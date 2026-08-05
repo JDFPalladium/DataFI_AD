@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import re
 
@@ -165,13 +167,13 @@ def _select_driver_indices(
     max_count: int,
 ) -> list[int]:
     """Pick a compact set of driver indices for coloring."""
-    if max_count <= 0:
+    if max_count <= 0 or not is_anomalous:
         return []
 
     score_order = np.argsort(np.nan_to_num(blended_scores, nan=-np.inf))[::-1]
     selected = [int(idx) for idx in score_order if primary_mask[idx]]
 
-    if is_anomalous and len(selected) < min_count:
+    if len(selected) < min_count:
         fallback = [
             int(idx)
             for idx in score_order
@@ -179,12 +181,9 @@ def _select_driver_indices(
         ]
         selected.extend(fallback)
 
-    if is_anomalous and len(selected) < min_count:
+    if len(selected) < min_count:
         last_resort = [int(idx) for idx in score_order if finite_mask[idx] and int(idx) not in selected]
         selected.extend(last_resort)
-
-    if not is_anomalous:
-        selected = [int(idx) for idx in selected if blended_scores[idx] > 0]
 
     return selected[:max_count]
 
