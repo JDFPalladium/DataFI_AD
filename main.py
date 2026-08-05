@@ -14,6 +14,7 @@ import sys
 import pandas as pd
 
 from src.anomaly_detection.detection import run_detection
+from src.anomaly_detection.output import write_output
 from src.anomaly_detection.preprocessing import validate_columns
 
 
@@ -109,8 +110,8 @@ def main():
     print(f"  Chi-square cutoff:     {report['chi2_cutoff']:.3f}")
     print(f"  Outliers flagged:      {report['n_outliers']} of {report['remaining_rows']} rows")
 
-    result.to_csv(args.output, index=False)
-    print(f"\nOutput written to: {args.output}")
+    output_path = write_output(result, report, args.output)
+    print(f"\nOutput written to: {output_path}")
 
 
 if __name__ == "__main__":

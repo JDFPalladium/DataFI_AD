@@ -14,6 +14,16 @@ def validate_columns(df: pd.DataFrame, id_cols: list) -> dict:
     for col in remaining:
         if pd.api.types.is_numeric_dtype(df[col]):
             numeric.append(col)
+            continue
+
+        try:
+            coerced = pd.to_numeric(df[col], errors="coerce")
+        except Exception:
+            coerced = None
+
+        if coerced is not None and coerced.notna().sum() > 0:
+            df[col] = coerced
+            numeric.append(col)
         else:
             non_numeric.append(col)
 
