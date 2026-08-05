@@ -36,9 +36,9 @@ def run_detection(
     Returns
     -------
     result_df : pd.DataFrame
-        All rows sorted by outlier flag (desc) then Mahalanobis distance (desc),
-        with added columns: mahalanobis_distance_sq, is_outlier,
-        top_deviation_indicator, E_<col>, D_<col>.
+        All rows sorted by anomaly flag (desc) then Mahalanobis distance (desc),
+        with added columns: mahalanobis_distance, anomalous,
+        top_deviation_indicator, and E_<col>.
     report : dict
         Summary of preprocessing steps and detection results.
     """
@@ -95,9 +95,24 @@ def run_detection(
 
     distances_sq = mahalanobis_missing(data, mu, cov)
 
-    # Chi-square cutoff: D^2 ~ chi2(k) where k = number of metric columns
-    cutoff = chi2.ppf(confidence, df=len(metric_cols))
-    outlier_flags = np.where(np.isnan(distances_sq), 0, (distances_sq > cutoff).astype(int))
+    # With missing values, each row has an effective dimension p_i = number of observed metrics.
+    # Compare D^2_i against chi2(p_i), not chi2(k), and rank by tail probability.
+    observed_metrics = np.sum(~np.isnan(data), axis=1).astype(int)
+    valid_mask = np.isfinite(distances_sq) & (observed_metrics >= 2)
+
+    row_cutoffs = np.full(len(distances_sq), np.nan, dtype=float)
+    row_cutoffs[valid_mask] = chi2.ppf(confidence, df=observed_metrics[valid_mask])
+
+    outlier_flags = np.zeros(len(distances_sq), dtype=int)
+    outlier_flags[valid_mask] = (distances_sq[valid_mask] > row_cutoffs[valid_mask]).astype(int)
+
+    mahalanobis_pvalue = np.full(len(distances_sq), np.nan, dtype=float)
+    mahalanobis_pvalue[valid_mask] = 1.0 - chi2.cdf(distances_sq[valid_mask], df=observed_metrics[valid_mask])
+
+    # Larger score = more anomalous; clipped to avoid inf for extreme tail probabilities.
+    anomaly_score = np.full(len(distances_sq), np.nan, dtype=float)
+    mahalanobis_pvalue_safe = np.clip(mahalanobis_pvalue[valid_mask], 1e-300, 1.0)
+    anomaly_score[valid_mask] = -np.log10(mahalanobis_pvalue_safe)
 
     estimates = estimate_values(data, mu, cov)
     deviations = compute_deviations(data, estimates, cov)
@@ -114,6 +129,9 @@ def run_detection(
         estimates=estimates_display,
         deviations=deviations,
         outlier_flags=outlier_flags,
+        observed_metrics=observed_metrics,
+        mahalanobis_pvalue=mahalanobis_pvalue,
+        anomaly_score=anomaly_score,
         min_value_threshold=min_value_threshold,
     )
 
@@ -121,9 +139,20 @@ def run_detection(
         **prep_report,
         "non_numeric_cols_dropped": validation["non_numeric_cols"],
         "n_outliers": int(outlier_flags.sum()),
-        "chi2_cutoff": float(cutoff),
+        "chi2_cutoff": float(chi2.ppf(confidence, df=len(metric_cols))),
+        "chi2_cutoff_by_observed_metrics": {
+            int(p): float(chi2.ppf(confidence, df=int(p))) for p in sorted(set(observed_metrics.tolist())) if p >= 2
+        },
         "confidence": confidence,
         "metric_cols_used": metric_cols,
+        "analysis_data": data_raw,
+        "estimated_data": estimates_display,
+        "covariance_matrix": cov,
+        "deviations": deviations,
+        "observed_metrics": observed_metrics,
+        "mahalanobis_pvalue": mahalanobis_pvalue,
+        "anomaly_score": anomaly_score,
+        "id_cols": id_cols,
         "warnings": [str(w) for w in warnings],
     }
 
